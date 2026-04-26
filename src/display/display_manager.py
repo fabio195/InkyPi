@@ -18,6 +18,11 @@ try:
 except ImportError:
     logger.info("Waveshare display not available, hardware support disabled")
 
+try:
+    from display.pico_usb_display import PicoUsbDisplay
+except ImportError:
+    logger.info("Pico USB display not available, hardware support disabled")
+
 class DisplayManager:
 
     """Manages the display and rendering of images."""
@@ -51,6 +56,8 @@ class DisplayManager:
             #
             # see https://github.com/waveshareteam/e-Paper
             self.display = WaveshareDisplay(device_config)
+        elif display_type in ("pico_usb", "pico_epd"):
+            self.display = PicoUsbDisplay(device_config)
         else:
             raise ValueError(f"Unsupported display type: {display_type}")
 
