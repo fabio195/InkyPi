@@ -60,7 +60,9 @@ class PicoUsbDisplay(AbstractDisplay):
         self._serial = serial
         self.port = self.device_config.get_config("pico_port", "/dev/ttyACM0")
         self.baudrate = int(self.device_config.get_config("pico_baudrate", 115200))
-        self.timeout_sec = float(self.device_config.get_config("pico_timeout_sec", 15))
+        # Total transfer for 800x480 BWR2 is ~96KB, which can take ~8-15s at 115200 depending
+        # on USB CDC buffering and MicroPython overhead. Use a safer default.
+        self.timeout_sec = float(self.device_config.get_config("pico_timeout_sec", 60))
         self.handshake_timeout_sec = float(
             self.device_config.get_config("pico_handshake_timeout_sec", 5)
         )

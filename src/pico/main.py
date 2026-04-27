@@ -5,8 +5,8 @@ stdin = sys.stdin.buffer
 stdout = sys.stdout
 
 def writeln(msg):
-    # Some MicroPython builds expose stdout without flush().
-    print(msg)
+    # Avoid relying on flush(); write newline-terminated records.
+    stdout.write(str(msg) + "\n")
 
 def read_line(timeout_ms=10000):
     start = time.ticks_ms()
@@ -24,13 +24,17 @@ def read_line(timeout_ms=10000):
 writeln("READY")
 
 def read_exact(n):
+    # Read exactly n bytes efficiently (no large allocations).
     remaining = n
+    buf = bytearray(1024)
+    mv = memoryview(buf)
     while remaining > 0:
-        chunk = stdin.read(remaining if remaining < 1024 else 1024)
-        if not chunk:
+        want = 1024 if remaining > 1024 else remaining
+        got = stdin.readinto(mv[:want])
+        if not got:
             time.sleep_ms(1)
             continue
-        remaining -= len(chunk)
+        remaining -= got
 
 while True:
     try:
