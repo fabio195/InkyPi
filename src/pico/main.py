@@ -59,11 +59,24 @@ while True:
                 continue
 
             try:
+                w = int(w)
+                h = int(h)
                 n_black = int(n_black)
                 n_red = int(n_red)
             except Exception:
                 writeln("ERR bad_len")
                 continue
+
+            # Validate expected payload sizes for packed 1bpp planes.
+            expected = ((w + 7) // 8) * h
+            if n_black != expected or n_red != expected:
+                # Drain provided payload bytes to resync stream then error.
+                read_exact(n_black + n_red)
+                writeln("ERR bad_plane_len exp={} got_black={} got_red={}".format(expected, n_black, n_red))
+                continue
+
+            # Signal host that we're ready to receive payloads.
+            writeln("RDY")
 
             # Consume payloads. Rendering will be implemented next.
             read_exact(n_black)

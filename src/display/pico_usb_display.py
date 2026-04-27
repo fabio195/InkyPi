@@ -189,6 +189,19 @@ class PicoUsbDisplay(AbstractDisplay):
         try:
             self.serial_conn.reset_input_buffer()
             self._write_all(header)
+            # Wait until Pico validates header and is ready, to avoid overrunning
+            # small firmware input buffers.
+            rdy_deadline = time.time() + self.timeout_sec
+            rdy = ""
+            while time.time() < rdy_deadline:
+                rdy = self._readline(1)
+                if rdy in ("RDY", "OK") or rdy.startswith("ERR"):
+                    break
+            if rdy.startswith("ERR"):
+                raise ValueError(f"Pico rejected frame header. Response: '{rdy}'")
+            if rdy not in ("RDY", "OK"):
+                raise ValueError("Pico did not respond RDY to frame header.")
+
             self._write_all(black_payload)
             self._write_all(red_payload)
             self.serial_conn.flush()
