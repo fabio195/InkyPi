@@ -42,6 +42,11 @@ class PicoUsbDisplay(AbstractDisplay):
             self.device_config.get_config("pico_handshake_enabled", True)
         )
         self.boot_wait_sec = float(self.device_config.get_config("pico_boot_wait_sec", 2))
+        self.write_timeout_sec = float(
+            self.device_config.get_config("pico_write_timeout_sec", 60)
+        )
+        self.tx_chunk_size = int(self.device_config.get_config("pico_tx_chunk_size", 4096))
+        self.tx_chunk_delay_ms = int(self.device_config.get_config("pico_tx_chunk_delay_ms", 1))
 
         # The rest of InkyPi expects a configured resolution from the device config.
         if not self.device_config.get_config("resolution"):
@@ -71,7 +76,7 @@ class PicoUsbDisplay(AbstractDisplay):
                 port=self.port,
                 baudrate=self.baudrate,
                 timeout=1,
-                write_timeout=self.timeout_sec,
+                write_timeout=self.write_timeout_sec,
             )
             # Opening CDC can reset some Pico firmwares; allow boot/banner time.
             time.sleep(self.boot_wait_sec)
@@ -118,7 +123,22 @@ class PicoUsbDisplay(AbstractDisplay):
         if self.serial_conn and self.serial_conn.is_open:
             return
         self.serial_conn = self._open_serial()
-        self._handshake()
+        if self.handshake_enabled:
+            self._handshake()
+
+    def _write_all(self, payload):
+        total = len(payload)
+        sent = 0
+        while sent < total:
+            chunk = payload[sent : sent + self.tx_chunk_size]
+            written = self.serial_conn.write(chunk)
+            if written is None:
+                written = 0
+            if written <= 0:
+                raise ValueError("Serial write returned zero bytes; Pico not reading data.")
+            sent += written
+            if self.tx_chunk_delay_ms > 0:
+                time.sleep(self.tx_chunk_delay_ms / 1000.0)
 
     def display_image(self, image, image_settings=[]):
         if image is None:
@@ -135,11 +155,14 @@ class PicoUsbDisplay(AbstractDisplay):
         header = f"FRAME {width} {height} RGB888 {len(payload)}\n".encode("ascii")
         try:
             self.serial_conn.reset_input_buffer()
-            self.serial_conn.write(header)
-            self.serial_conn.write(payload)
+            self._write_all(header)
+            self._write_all(payload)
             self.serial_conn.flush()
         except Exception as exc:
-            raise ValueError(f"Failed to write frame to Pico: {exc}") from exc
+            raise ValueError(
+                f"Failed to write frame to Pico: {exc}. "
+                "The Pico firmware may not be reading USB serial data or expects a different protocol."
+            ) from exc
 
         response = self._readline(self.timeout_sec)
         if response != "OK":
