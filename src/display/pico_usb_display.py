@@ -196,11 +196,16 @@ class PicoUsbDisplay(AbstractDisplay):
                 "The Pico firmware may not be reading USB serial data or expects a different protocol."
             ) from exc
 
-        response = self._readline(self.timeout_sec)
+        # Pico may emit boot/debug chatter; read until OK/ERR or timeout.
+        deadline = time.time() + self.timeout_sec
+        response = ""
+        while time.time() < deadline:
+            response = self._readline(1)
+            if response in ("OK",) or response.startswith("ERR"):
+                break
+
         if response != "OK":
-            raise ValueError(
-                f"Pico rejected frame update. Response: '{response or '<empty>'}'"
-            )
+            raise ValueError(f"Pico rejected frame update. Response: '{response or '<empty>'}'")
 
         logger.info(
             "Frame sent to Pico over USB (%sx%s, black=%s bytes, red=%s bytes).",

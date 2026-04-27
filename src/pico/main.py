@@ -33,31 +33,43 @@ def read_exact(n):
         remaining -= len(chunk)
 
 while True:
-    line = read_line(60000)
-    if line is None:
-        continue
-    if line == "PING":
-        writeln("PONG")
-    elif line.startswith("FRAME "):
-        parts = line.split()
-        # FRAME <w> <h> BWR2 <black_bytes> <red_bytes>
-        if len(parts) != 6:
-            writeln("ERR bad_header")
-            continue
-        _, w, h, fmt, n_black, n_red = parts
-        if fmt != "BWR2":
-            writeln("ERR bad_fmt")
-            continue
-        try:
-            n_black = int(n_black)
-            n_red = int(n_red)
-        except:
-            writeln("ERR bad_len")
+    try:
+        line = read_line(60000)
+        if line is None:
             continue
 
-        # Consume payloads. Rendering will be implemented next.
-        read_exact(n_black)
-        read_exact(n_red)
-        writeln("OK")
-    else:
+        if line == "PING":
+            writeln("PONG")
+            continue
+
+        if line.startswith("FRAME "):
+            parts = line.split()
+            # FRAME <w> <h> BWR2 <black_bytes> <red_bytes>
+            if len(parts) != 6:
+                writeln("ERR bad_header")
+                continue
+
+            _, w, h, fmt, n_black, n_red = parts
+            if fmt != "BWR2":
+                writeln("ERR bad_fmt")
+                continue
+
+            try:
+                n_black = int(n_black)
+                n_red = int(n_red)
+            except Exception:
+                writeln("ERR bad_len")
+                continue
+
+            # Consume payloads. Rendering will be implemented next.
+            read_exact(n_black)
+            read_exact(n_red)
+            writeln("OK")
+            continue
+
+        # Unknown command
         writeln("ERR " + line)
+    except Exception as exc:
+        # Never crash to REPL; keep USB protocol stable.
+        writeln("ERR exception {}".format(exc))
+        time.sleep(0.2)
