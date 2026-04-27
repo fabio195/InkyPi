@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import base64
 
 from .abstract_display import AbstractDisplay
 from PIL import Image
@@ -18,6 +19,15 @@ class PicoUsbDisplay(AbstractDisplay):
       3) Host sends: FRAME <width> <height> BWR2 <black_bytes> <red_bytes>\\n
       4) Host sends packed 1bpp black plane bytes, then packed 1bpp red plane bytes
       5) Pico responds: OK\\n (or ERR <reason>\\n)
+
+    Alternate transport (recommended when only one USB CDC port is exposed):
+      3) Host sends: FRAME <width> <height> BWR2B64 <black_bytes> <red_bytes>\\n
+      4) Pico responds: RDY\\n
+      5) Host sends base64 lines:
+           BLK <base64>\\n ... (until black_bytes decoded)
+           RED <base64>\\n ... (until red_bytes decoded)
+         then DONE\\n
+      6) Pico responds: OK\\n (or ERR <reason>\\n)
     """
 
     DEFAULT_RESOLUTION = [800, 480]
@@ -89,6 +99,8 @@ class PicoUsbDisplay(AbstractDisplay):
         )
         self.tx_chunk_size = int(self.device_config.get_config("pico_tx_chunk_size", 4096))
         self.tx_chunk_delay_ms = int(self.device_config.get_config("pico_tx_chunk_delay_ms", 1))
+        self.transport = self.device_config.get_config("pico_transport", "b64").lower()
+        self.b64_line_bytes = int(self.device_config.get_config("pico_b64_line_bytes", 768))
 
         # The rest of InkyPi expects a configured resolution from the device config.
         if not self.device_config.get_config("resolution"):
@@ -194,9 +206,10 @@ class PicoUsbDisplay(AbstractDisplay):
         black_payload = self._pack_1bpp(black_layer)
         red_payload = self._pack_1bpp(red_layer)
 
-        header = (
-            f"FRAME {width} {height} BWR2 {len(black_payload)} {len(red_payload)}\n"
-        ).encode("ascii")
+        fmt = "BWR2B64" if self.transport == "b64" else "BWR2"
+        header = f"FRAME {width} {height} {fmt} {len(black_payload)} {len(red_payload)}\n".encode(
+            "ascii"
+        )
         try:
             self.serial_conn.reset_input_buffer()
             self._write_all(header)
@@ -213,8 +226,18 @@ class PicoUsbDisplay(AbstractDisplay):
             if rdy not in ("RDY", "OK"):
                 raise ValueError("Pico did not respond RDY to frame header.")
 
-            self._write_all(black_payload)
-            self._write_all(red_payload)
+            if fmt == "BWR2":
+                self._write_all(black_payload)
+                self._write_all(red_payload)
+            else:
+                # Base64-chunked ASCII transport to avoid raw control bytes on console CDC.
+                for prefix, payload in (("BLK", black_payload), ("RED", red_payload)):
+                    for i in range(0, len(payload), self.b64_line_bytes):
+                        chunk = payload[i : i + self.b64_line_bytes]
+                        b64 = base64.b64encode(chunk).decode("ascii")
+                        line = f"{prefix} {b64}\n".encode("ascii")
+                        self._write_all(line)
+                self._write_all(b"DONE\n")
             self.serial_conn.flush()
         except Exception as exc:
             raise ValueError(

@@ -1,6 +1,7 @@
 import sys
 import time
 import uselect
+import ubinascii
 try:
     import usb_cdc
 except ImportError:
@@ -89,12 +90,13 @@ while True:
         if line.startswith("FRAME "):
             parts = line.split()
             # FRAME <w> <h> BWR2 <black_bytes> <red_bytes>
+            # FRAME <w> <h> BWR2B64 <black_bytes> <red_bytes>
             if len(parts) != 6:
                 writeln("ERR bad_header")
                 continue
 
             _, w, h, fmt, n_black, n_red = parts
-            if fmt != "BWR2":
+            if fmt not in ("BWR2", "BWR2B64"):
                 writeln("ERR bad_fmt")
                 continue
 
@@ -119,8 +121,34 @@ while True:
             writeln("RDY")
 
             # Consume payloads. Rendering will be implemented next.
-            read_exact(n_black)
-            read_exact(n_red)
+            if fmt == "BWR2":
+                read_exact(n_black)
+                read_exact(n_red)
+            else:
+                # Base64-chunked ASCII transport.
+                got_black = 0
+                got_red = 0
+                while True:
+                    l2 = read_line(60000)
+                    if l2 is None:
+                        raise RuntimeError("rx_timeout")
+                    if l2 == "DONE":
+                        break
+                    if l2.startswith("BLK "):
+                        raw = ubinascii.a2b_base64(l2[4:])
+                        got_black += len(raw)
+                        # discard for now (render later)
+                        continue
+                    if l2.startswith("RED "):
+                        raw = ubinascii.a2b_base64(l2[4:])
+                        got_red += len(raw)
+                        continue
+                    writeln("ERR bad_data_line")
+                    break
+
+                if got_black != n_black or got_red != n_red:
+                    writeln("ERR bad_b64_len got_black={} got_red={}".format(got_black, got_red))
+                    continue
             writeln("OK")
             continue
 
