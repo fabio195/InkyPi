@@ -5,8 +5,8 @@ stdin = sys.stdin.buffer
 stdout = sys.stdout
 
 def writeln(msg):
-    stdout.write(msg + "\n")
-    stdout.flush()
+    # Some MicroPython builds expose stdout without flush().
+    print(msg)
 
 def read_line(timeout_ms=10000):
     start = time.ticks_ms()
