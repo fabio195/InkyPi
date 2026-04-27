@@ -1,6 +1,9 @@
 import sys
 import time
-import uselect
+try:
+    import uselect as _select
+except ImportError:
+    import select as _select
 
 # Simple USB-serial protocol bridge for InkyPi (inkypi-v1)
 # Commands:
@@ -10,8 +13,8 @@ import uselect
 
 stdin = sys.stdin.buffer
 stdout = sys.stdout
-poller = uselect.poll()
-poller.register(stdin, uselect.POLLIN)
+poller = _select.poll()
+poller.register(stdin, _select.POLLIN)
 
 def writeln(msg: str):
     stdout.write(msg + "\n")
@@ -80,4 +83,11 @@ def main():
         else:
             writeln("ERR unknown_command")
 
-main()
+
+while True:
+    try:
+        main()
+    except Exception as exc:
+        # Keep the bridge process alive and visible instead of dropping to REPL.
+        writeln("ERR bridge_crash {}".format(exc))
+        time.sleep(1.0)
