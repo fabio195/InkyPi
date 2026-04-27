@@ -24,17 +24,20 @@ def read_line(timeout_ms=10000):
 writeln("READY")
 
 def read_exact(n):
-    # Read exactly n bytes efficiently (no large allocations).
+    # Read exactly n bytes with a timeout.
+    # Note: some MicroPython builds return None for readinto(), so use read().
     remaining = n
-    buf = bytearray(1024)
-    mv = memoryview(buf)
+    start = time.ticks_ms()
+    timeout_ms = 120_000
     while remaining > 0:
+        if time.ticks_diff(time.ticks_ms(), start) > timeout_ms:
+            raise RuntimeError("rx_timeout")
         want = 1024 if remaining > 1024 else remaining
-        got = stdin.readinto(mv[:want])
-        if not got:
+        chunk = stdin.read(want)
+        if not chunk:
             time.sleep_ms(1)
             continue
-        remaining -= got
+        remaining -= len(chunk)
 
 while True:
     try:
