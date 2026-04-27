@@ -29,8 +29,9 @@ Adjust `resolution` to your panel.
 From host (InkyPi) to Pico:
 
 1. `PING\n`
-2. `FRAME <width> <height> RGB888 <payload_len>\n`
-3. raw payload bytes (`width * height * 3`)
+2. `FRAME <width> <height> BWR2 <black_len> <red_len>\n`
+3. packed 1bpp black plane payload (`black_len` bytes)
+4. packed 1bpp red plane payload (`red_len` bytes)
 
 From Pico back to host:
 
@@ -44,3 +45,4 @@ From Pico back to host:
 - Ensure the InkyPi service user can access that device.
 - If handshake fails, check Pico firmware logs and verify it replies with `PONG`.
 - If frame transfer fails, verify Pico expects `RGB888` and exact payload length.
+- For `epd7in5b_V2` (B/W/Red), `BWR2` is strongly recommended since it is much smaller than RGB.

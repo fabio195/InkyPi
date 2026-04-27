@@ -2,6 +2,7 @@ import logging
 import time
 
 from .abstract_display import AbstractDisplay
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -13,12 +14,40 @@ class PicoUsbDisplay(AbstractDisplay):
     Protocol (inkypi-v1):
       1) Host sends: PING\\n
       2) Pico responds: PONG\\n
-      3) Host sends: FRAME <width> <height> RGB888 <bytes>\\n
-      4) Host sends raw RGB888 payload bytes (width*height*3)
+      3) Host sends: FRAME <width> <height> BWR2 <black_bytes> <red_bytes>\\n
+      4) Host sends packed 1bpp black plane bytes, then packed 1bpp red plane bytes
       5) Pico responds: OK\\n (or ERR <reason>\\n)
     """
 
     DEFAULT_RESOLUTION = [800, 480]
+
+    def _pack_1bpp(self, img_1bit):
+        if img_1bit.mode != "1":
+            raise ValueError("Expected 1-bit image (mode '1').")
+        width, height = img_1bit.size
+        expected_len = ((width + 7) // 8) * height
+        data = img_1bit.tobytes()
+        if len(data) != expected_len:
+            raise ValueError(
+                f"Unexpected packed length for 1bpp image: got {len(data)}, expected {expected_len}"
+            )
+        return data
+
+    def _split_bwr_layers(self, image):
+        # Use the same approach as Waveshare bi-color splitting (black + red).
+        black = (0, 0, 0)
+        white = (255, 255, 255)
+        red = (255, 0, 0)
+
+        palette_data = [*black, *white, *red]
+        palette_img = Image.new("P", (1, 1))
+        palette_img.putpalette(palette_data)
+
+        rgb = image.convert("RGB")
+        indexed = rgb.quantize(palette=palette_img, dither=Image.Dither.FLOYDSTEINBERG)
+        black_layer = indexed.point(lambda p: 0 if p == 0 else 1, mode="1")
+        red_layer = indexed.point(lambda p: 0 if p == 2 else 1, mode="1")
+        return black_layer, red_layer
 
     def initialize_display(self):
         try:
@@ -146,17 +175,20 @@ class PicoUsbDisplay(AbstractDisplay):
 
         self._ensure_connection()
 
-        # Device-specific rendering work is expected on the Pico side.
-        # We send raw RGB data to avoid adding host-side format assumptions.
-        rgb_image = image.convert("RGB")
-        width, height = rgb_image.size
-        payload = rgb_image.tobytes()
+        width, height = image.size
 
-        header = f"FRAME {width} {height} RGB888 {len(payload)}\n".encode("ascii")
+        black_layer, red_layer = self._split_bwr_layers(image)
+        black_payload = self._pack_1bpp(black_layer)
+        red_payload = self._pack_1bpp(red_layer)
+
+        header = (
+            f"FRAME {width} {height} BWR2 {len(black_payload)} {len(red_payload)}\n"
+        ).encode("ascii")
         try:
             self.serial_conn.reset_input_buffer()
             self._write_all(header)
-            self._write_all(payload)
+            self._write_all(black_payload)
+            self._write_all(red_payload)
             self.serial_conn.flush()
         except Exception as exc:
             raise ValueError(
@@ -171,8 +203,9 @@ class PicoUsbDisplay(AbstractDisplay):
             )
 
         logger.info(
-            "Frame sent to Pico over USB (%sx%s, %s bytes).",
+            "Frame sent to Pico over USB (%sx%s, black=%s bytes, red=%s bytes).",
             width,
             height,
-            len(payload),
+            len(black_payload),
+            len(red_payload),
         )
