@@ -1,12 +1,15 @@
 import sys
 import time
+import uselect
 
 stdin = sys.stdin.buffer
 stdout = sys.stdout
+poller = uselect.poll()
+poller.register(stdin, uselect.POLLIN)
 
 def writeln(msg):
-    # Avoid relying on flush(); write newline-terminated records.
-    stdout.write(str(msg) + "\n")
+    # print() is the most reliable across MicroPython builds for USB CDC stdout.
+    print(msg)
 
 def read_line(timeout_ms=10000):
     start = time.ticks_ms()
@@ -25,13 +28,18 @@ writeln("READY")
 
 def read_exact(n):
     # Read exactly n bytes with a timeout.
-    # Note: some MicroPython builds return None for readinto(), so use read().
     remaining = n
     start = time.ticks_ms()
     timeout_ms = 120_000
     while remaining > 0:
         if time.ticks_diff(time.ticks_ms(), start) > timeout_ms:
             raise RuntimeError("rx_timeout")
+        # Don't call stdin.read(n) unless data is available; it can block forever.
+        events = poller.poll(10)
+        if not events:
+            time.sleep_ms(1)
+            continue
+
         want = 1024 if remaining > 1024 else remaining
         chunk = stdin.read(want)
         if not chunk:
