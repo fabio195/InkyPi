@@ -1,21 +1,50 @@
 import sys
 import time
 import uselect
+try:
+    import usb_cdc
+except ImportError:
+    usb_cdc = None
 
-stdin = sys.stdin.buffer
-stdout = sys.stdout
+#
+# IMPORTANT:
+# Prefer MicroPython's usb_cdc.data channel for binary transfers. Using the console
+# channel (sys.stdin/sys.stdout) can interpret certain bytes (e.g. Ctrl-C) as REPL
+# control, which breaks long binary streams.
+#
+if usb_cdc and getattr(usb_cdc, "data", None):
+    io_in = usb_cdc.data
+    io_out = usb_cdc.data
+    console_out = getattr(usb_cdc, "console", sys.stdout)
+else:
+    io_in = sys.stdin.buffer
+    io_out = sys.stdout
+    console_out = sys.stdout
+
 poller = uselect.poll()
-poller.register(stdin, uselect.POLLIN)
+poller.register(io_in, uselect.POLLIN)
 
 def writeln(msg):
-    # print() is the most reliable across MicroPython builds for USB CDC stdout.
-    print(msg)
+    # Send protocol replies on the chosen IO channel.
+    try:
+        io_out.write((str(msg) + "\n").encode() if hasattr(io_out, "write") and io_out is not sys.stdout else str(msg) + "\n")
+    except Exception:
+        # Fallback for odd builds.
+        try:
+            console_out.write(str(msg) + "\n")
+        except Exception:
+            pass
 
 def read_line(timeout_ms=10000):
     start = time.ticks_ms()
     buf = b""
     while time.ticks_diff(time.ticks_ms(), start) < timeout_ms:
-        b = stdin.read(1)
+        events = poller.poll(10)
+        if not events:
+            time.sleep_ms(1)
+            continue
+
+        b = io_in.read(1)
         if b:
             if b == b"\n":
                 return buf.decode("utf-8", "replace").strip()
@@ -41,7 +70,7 @@ def read_exact(n):
             continue
 
         want = 1024 if remaining > 1024 else remaining
-        chunk = stdin.read(want)
+        chunk = io_in.read(want)
         if not chunk:
             time.sleep_ms(1)
             continue

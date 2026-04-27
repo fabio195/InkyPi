@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 
 from .abstract_display import AbstractDisplay
@@ -59,6 +60,16 @@ class PicoUsbDisplay(AbstractDisplay):
 
         self._serial = serial
         self.port = self.device_config.get_config("pico_port", "/dev/ttyACM0")
+        self.prefer_data_port = bool(self.device_config.get_config("pico_prefer_data_port", True))
+        if (
+            self.prefer_data_port
+            and self.port == "/dev/ttyACM0"
+            and os.path.exists("/dev/ttyACM1")
+        ):
+            # MicroPython can expose usb_cdc.console + usb_cdc.data as two ACM devices.
+            # Prefer the data channel for binary transfers.
+            self.port = "/dev/ttyACM1"
+            logger.info("Pico USB data port detected; using %s", self.port)
         self.baudrate = int(self.device_config.get_config("pico_baudrate", 115200))
         # Total transfer for 800x480 BWR2 is ~96KB, which can take 10s-60s depending on
         # baud, USB CDC buffering, and MicroPython overhead. Use a safer default.
