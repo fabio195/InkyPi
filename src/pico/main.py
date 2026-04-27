@@ -1,5 +1,6 @@
 import sys
 import time
+import uselect
 
 # Simple USB-serial protocol bridge for InkyPi (inkypi-v1)
 # Commands:
@@ -9,6 +10,8 @@ import time
 
 stdin = sys.stdin.buffer
 stdout = sys.stdout
+poller = uselect.poll()
+poller.register(stdin, uselect.POLLIN)
 
 def writeln(msg: str):
     stdout.write(msg + "\n")
@@ -18,15 +21,14 @@ def read_line(timeout_s=10):
     start = time.ticks_ms()
     buf = bytearray()
     while True:
-        if stdin.peek(1):
+        events = poller.poll(2)
+        if events:
             b = stdin.read(1)
             if not b:
                 continue
             if b == b"\n":
                 return buf.decode("utf-8", "replace").strip()
             buf.extend(b)
-        else:
-            time.sleep_ms(2)
 
         if time.ticks_diff(time.ticks_ms(), start) > int(timeout_s * 1000):
             return None
